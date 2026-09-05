@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+outputs/
+data/processed/*
+!data/processed/.gitkeep
+data/remedi/raw/*
+!data/remedi/raw/.gitkeep
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+*.index
+*.npy
+.DS_Store

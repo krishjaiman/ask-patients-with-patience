@@ -1,0 +1,112 @@
+[
+  {
+    "disease": "Orthostatic Hypotension",
+    "specialty": "Neurology",
+    "symptoms": ["dizziness", "light-headedness", "fainting", "blurred vision on standing"],
+    "causes": "A drop in blood pressure upon standing, often related to dehydration, prolonged bed rest, certain medications, or autonomic nervous system dysfunction.",
+    "pathophysiology": "Insufficient vasoconstriction/heart-rate compensation when moving from lying or sitting to standing causes transient cerebral hypoperfusion.",
+    "diagnosis": "Suggested by symptoms of dizziness or faintness specifically on standing, and confirmed with orthostatic blood-pressure measurements taken lying, sitting, and standing.",
+    "what_a_doctor_does": "Ask about timing relative to posture changes, medication history, hydration, and check blood pressure in multiple positions.",
+    "consumer_summary": "Feeling dizzy or light-headed mainly when you stand up quickly, sometimes with brief loss of balance."
+  },
+  {
+    "disease": "Vertigo (Peripheral, e.g. BPPV)",
+    "specialty": "Neurology",
+    "symptoms": ["spinning sensation", "dizziness", "nausea", "hearing loss", "tinnitus", "loss of balance"],
+    "causes": "Most commonly benign paroxysmal positional vertigo (BPPV) from displaced inner-ear crystals, or Meniere's disease.",
+    "pathophysiology": "Abnormal signals from the vestibular system create a false sensation of motion or spinning, often triggered by head position changes.",
+    "diagnosis": "Ask about whether the sensation is a true spinning feeling versus general light-headedness, triggers related to head movement, and any associated hearing symptoms.",
+    "what_a_doctor_does": "Positional testing (e.g. Dix-Hallpike maneuver), hearing assessment, and review of episode duration/frequency.",
+    "consumer_summary": "A spinning or whirling sensation, sometimes brought on by rolling over in bed or looking up."
+  },
+  {
+    "disease": "Cervical Spondylosis",
+    "specialty": "Neurology",
+    "symptoms": ["neck stiffness", "dizziness", "headache", "arm numbness"],
+    "causes": "Age-related degeneration of the cervical spine discs and joints.",
+    "pathophysiology": "Degenerative changes can irritate nerves or restrict blood flow contributing to dizziness with neck movement.",
+    "diagnosis": "History of neck pain/stiffness with dizziness related to neck posture; imaging can confirm degenerative changes.",
+    "what_a_doctor_does": "Ask about neck pain, posture-related triggers, prior neck injury, and perform a neck range-of-motion exam.",
+    "consumer_summary": "Neck stiffness or soreness along with occasional dizziness, especially after turning your head."
+  },
+  {
+    "disease": "Lactose Intolerance",
+    "specialty": "Gastroenterology",
+    "symptoms": ["abdominal cramping", "bloating", "diarrhea", "nausea", "gas"],
+    "causes": "Reduced lactase enzyme activity leading to undigested lactose fermenting in the colon.",
+    "pathophysiology": "Undigested lactose draws water into the intestine and is fermented by gut bacteria, producing gas and cramping.",
+    "diagnosis": "Symptom correlation with dairy intake, timing (typically 30 minutes to 2 hours after consuming dairy), and symptom relief on a lactose-free trial.",
+    "what_a_doctor_does": "Ask specifically about dairy consumption (milk, ice cream, cheese) preceding symptoms and consider a lactose-free trial or hydrogen breath test.",
+    "consumer_summary": "Stomach cramps, bloating, or loose stools that tend to happen after eating dairy like milk or ice cream."
+  },
+  {
+    "disease": "Gastroesophageal Reflux Disease",
+    "specialty": "Gastroenterology",
+    "symptoms": ["heartburn", "regurgitation", "chest discomfort", "sour taste", "cough"],
+    "causes": "Relaxation of the lower esophageal sphincter allowing stomach acid to flow back into the esophagus.",
+    "pathophysiology": "Acid exposure irritates the esophageal lining, producing burning discomfort, often worse when lying down or after large meals.",
+    "diagnosis": "Symptom pattern related to meals and lying down; trial of acid-suppressing medication; endoscopy in persistent/atypical cases.",
+    "what_a_doctor_does": "Ask about meal timing, lying down after eating, spicy/fatty food triggers, and any alarm symptoms (difficulty swallowing, weight loss).",
+    "consumer_summary": "A burning feeling in the chest or throat, often after eating or when lying down."
+  },
+  {
+    "disease": "Functional Gastrointestinal Disorder (e.g. IBS)",
+    "specialty": "Gastroenterology",
+    "symptoms": ["cramping abdominal pain", "bloating", "altered bowel habits", "urgency"],
+    "causes": "Not fully understood; associated with gut-brain axis dysregulation, stress, and altered gut motility/sensitivity.",
+    "pathophysiology": "Visceral hypersensitivity and abnormal motility produce recurrent pain typically relieved by defecation.",
+    "diagnosis": "Recurrent abdominal pain associated with a change in stool frequency or form, in the absence of alarm features.",
+    "what_a_doctor_does": "Ask about pain-defecation relationship, stress triggers, and screen for alarm symptoms warranting further workup.",
+    "consumer_summary": "Ongoing stomach cramping and irregular bowel habits, often linked to stress or certain foods, without a clear single trigger."
+  },
+  {
+    "disease": "Allergic Rhinitis",
+    "specialty": "Otolaryngology",
+    "symptoms": ["nasal congestion", "clear runny nose", "sneezing", "itchy nose", "itchy eyes"],
+    "causes": "IgE-mediated allergic reaction to airborne allergens such as dust mites, pollen, or pet dander.",
+    "pathophysiology": "Allergen exposure triggers histamine release causing nasal mucosal swelling, clear rhinorrhea, and itching.",
+    "diagnosis": "Clear, thin nasal discharge with itching and sneezing, often seasonal or with specific environmental triggers.",
+    "what_a_doctor_does": "Ask about discharge color/consistency, itching in nose/eyes/throat, and exposure to dust, pets, or seasonal pollen.",
+    "consumer_summary": "A stuffy or runny nose with clear, watery discharge, itching, and sneezing, often triggered by dust, pollen, or pets."
+  },
+  {
+    "disease": "Acute Sinusitis",
+    "specialty": "Otolaryngology",
+    "symptoms": ["nasal congestion", "thick nasal discharge", "facial pain", "headache", "fever"],
+    "causes": "Viral or bacterial infection causing inflammation of the sinus lining, often following a cold.",
+    "pathophysiology": "Inflammation blocks sinus drainage, leading to pressure, pain, and thickened discharge.",
+    "diagnosis": "Facial pain/pressure with thick, often discolored nasal discharge, sometimes with fever, lasting more than a week.",
+    "what_a_doctor_does": "Ask about discharge color, facial pain location, duration of symptoms, and recent upper-respiratory infection.",
+    "consumer_summary": "Nasal blockage with thick, colored mucus, facial pressure or pain, sometimes with fever."
+  },
+  {
+    "disease": "Vasomotor Rhinitis",
+    "specialty": "Otolaryngology",
+    "symptoms": ["nasal congestion", "clear runny nose", "post-nasal drip"],
+    "causes": "Non-allergic nasal hyperreactivity triggered by irritants, temperature change, or strong odors rather than an immune allergic response.",
+    "pathophysiology": "Autonomic nervous system overreaction to non-allergic triggers causes nasal blood vessel dilation and congestion.",
+    "diagnosis": "Similar symptoms to allergic rhinitis but without a clear allergen trigger and typically negative allergy testing.",
+    "what_a_doctor_does": "Ask about specific triggers (temperature changes, strong smells, spicy food) and rule out allergic causes.",
+    "consumer_summary": "Stuffy or runny nose triggered by things like weather changes, strong smells, or spicy food rather than allergies."
+  },
+  {
+    "disease": "Decongestant Overuse (Rhinitis Medicamentosa)",
+    "specialty": "Otolaryngology",
+    "symptoms": ["nasal congestion", "rebound stuffiness"],
+    "causes": "Prolonged use of over-the-counter nasal decongestant sprays beyond a few days.",
+    "pathophysiology": "Repeated vasoconstriction leads to rebound vasodilation and worsening congestion once the medication wears off.",
+    "diagnosis": "History of extended nasal decongestant spray use with worsening congestion despite continued or increased use.",
+    "what_a_doctor_does": "Ask specifically about over-the-counter nasal spray use and duration.",
+    "consumer_summary": "Nasal stuffiness that keeps coming back or gets worse despite using decongestant nasal sprays regularly."
+  },
+  {
+    "disease": "Polycystic Ovary Syndrome",
+    "specialty": "Gynecology",
+    "symptoms": ["irregular periods", "acne", "excess hair growth", "weight gain"],
+    "causes": "Hormonal imbalance involving elevated androgens and insulin resistance.",
+    "pathophysiology": "Disrupted ovulation and elevated androgens lead to irregular cycles and associated skin/hair changes.",
+    "diagnosis": "Combination of irregular periods, clinical or biochemical signs of excess androgens, and/or ultrasound findings.",
+    "what_a_doctor_does": "Ask about menstrual regularity, hair growth pattern, acne, and family history; may order hormone panels and pelvic ultrasound.",
+    "consumer_summary": "Irregular periods along with symptoms like acne or extra hair growth, related to a hormone imbalance."
+  }
+]

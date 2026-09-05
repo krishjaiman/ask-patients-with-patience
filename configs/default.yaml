@@ -1,0 +1,50 @@
+# Default configuration for the AskPatients reproduction.
+# Every field here maps to askpatients.config.Config. Override any subset
+# via --config path/to/your.yaml on the scripts, or edit in place.
+
+seed: 42
+
+llm:
+  provider: mock          # mock | openai | anthropic
+  model: gpt-4o-mini
+  temperature: 0.2
+  max_tokens: 1024
+  max_retries: 5
+  retry_base_delay: 1.5
+  request_timeout: 60.0
+
+rag:
+  embedding_provider: mock   # mock | openai | sentence-transformers
+  embedding_model: text-embedding-3-small
+  chunk_size: 400
+  chunk_overlap: 60
+  top_k: 5
+  index_path: data/processed/faiss.index
+  metadata_path: data/processed/chunks.jsonl
+
+algo:
+  # Section 3.3 of the paper
+  num_candidate_questions: 5      # K
+  min_responses_per_question: 2   # L (lower bound)
+  max_responses_per_question: 5   # L (upper bound)
+  max_dialogue_turns: 6           # six rounds of iterative questioning
+  top_n_diseases_for_questions: 8
+  min_prob_floor: 1.0e-6
+
+patient:
+  persona_model_provider: mock
+  max_turns_patient_will_answer: 6
+  reveal_diagnosis: false
+
+eval:
+  dataset_diagnosis_only_size: 329
+  eval_subset_size: 100
+  seed: 42
+  accuracy_scale_max: 5
+  output_dir: outputs
+
+paths:
+  remedi_raw: data/remedi/raw
+  remedi_processed: data/processed/remedi_diagnosis_only.jsonl
+  remedi_eval_subset: data/processed/remedi_eval_100.jsonl
+  knowledge_base_dir: data/knowledge_base
