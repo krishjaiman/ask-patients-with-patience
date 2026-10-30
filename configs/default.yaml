@@ -30,11 +30,12 @@ algo:
   max_dialogue_turns: 6           # six rounds of iterative questioning
   top_n_diseases_for_questions: 8
   min_prob_floor: 1.0e-6
+  belief_update: dialogue        # full dialogue estimate; bayesian = legacy approximation
 
-patient:
-  persona_model_provider: mock
-  max_turns_patient_will_answer: 6
-  reveal_diagnosis: false
+# Optional separate role configurations; null inherits llm above.
+profile_llm: null
+patient_llm: null
+judge_llm: null
 
 eval:
   dataset_diagnosis_only_size: 329

@@ -23,7 +23,7 @@ from askpatients.evaluation.metrics import (
 )
 from askpatients.llm.base import BaseLLM
 from askpatients.medical.knowledge_base import KnowledgeBase
-from askpatients.patient.profile import build_profile_from_case
+from askpatients.patient.store import get_profile
 from askpatients.patient.simulator import PatientSimulator
 from askpatients.rag.retriever import Retriever
 
@@ -37,7 +37,10 @@ class CaseResult:
     ground_truth: str
     method: str
     predicted_diagnosis: str
-    accuracy_score: int
+    accuracy_score: Optional[int]
+    status: str = 'success'
+    error: str = ''
+    trace: dict = field(default_factory=dict)
     entropy_trajectory: List[float] = field(default_factory=list)
     entropy_reduction: float = 0.0
     accessibility: Optional[int] = None
@@ -48,21 +51,21 @@ class CaseResult:
 
 class EvaluationRunner:
     def __init__(self, config: Config, llm: BaseLLM, judge_llm: BaseLLM,
-                 kb: KnowledgeBase, retriever: Retriever):
+                 kb: KnowledgeBase, retriever: Retriever, profile_llm=None, patient_llm=None,
+                 profile_cache_dir='data/processed/profiles'):
         self.config = config
         self.llm = llm
         self.judge_llm = judge_llm
         self.kb = kb
         self.retriever = retriever
+        self.profile_llm = profile_llm or llm
+        self.patient_llm = patient_llm or llm
+        self.profile_cache_dir = profile_cache_dir
 
     # ------------------------------------------------------------ one case
     def _build_patient(self, case: ReMeDiCase) -> PatientSimulator:
-        profile = build_profile_from_case(
-            self.llm, case_id=case.case_id, transcript=case.full_transcript_text(),
-            presenting_complaint=case.opening_patient_turn(),
-            symptoms=[], ground_truth_diagnosis=case.ground_truth_diagnosis,
-        )
-        return PatientSimulator(self.llm, profile)
+        profile = get_profile(self.profile_llm, case, self.profile_cache_dir)
+        return PatientSimulator(self.patient_llm, profile)
 
     def run_one_shot(self, case: ReMeDiCase) -> CaseResult:
         patient = self._build_patient(case)
@@ -73,6 +76,8 @@ class EvaluationRunner:
         return CaseResult(
             case_id=case.case_id, specialty=case.specialty, ground_truth=case.ground_truth_diagnosis,
             method="one_shot", predicted_diagnosis=predicted, accuracy_score=judged.score,
+            trace={'opening': patient.opening_statement(), 'ranked_diagnoses': ranked,
+                   'judge': judged.model_dump()},
         )
 
     def run_naive_multi_turn(self, case: ReMeDiCase) -> CaseResult:
@@ -85,10 +90,14 @@ class EvaluationRunner:
         transcript_text = "\n".join(
             f"Doctor: {t['question']}\nPatient: {t['response']}" for t in result["transcript"]
         )
+        transcript_text = f'Doctor: {case.opening_doctor_turn()}\nPatient: {patient.opening_statement()}\n' + transcript_text
         hc = judge_human_centric_quality(self.judge_llm, transcript_text)
         return CaseResult(
             case_id=case.case_id, specialty=case.specialty, ground_truth=case.ground_truth_diagnosis,
             method="naive_multi_turn", predicted_diagnosis=predicted, accuracy_score=judged.score,
+            trace={**result, 'judge': judged.model_dump(),
+                   'opening_question': case.opening_doctor_turn(),
+                   'opening_response': patient.opening_statement()},
             accessibility=hc.accessibility, empathy=hc.empathy,
             relevant_response=hc.relevant_response, fosters_relationship=hc.fosters_relationship,
         )
@@ -102,10 +111,12 @@ class EvaluationRunner:
         transcript_text = "\n".join(
             f"Doctor: {t.human_question}\nPatient: {t.patient_response}" for t in result.turns
         )
+        transcript_text = f'Doctor: {case.opening_doctor_turn()}\nPatient: {patient.opening_statement()}\n' + transcript_text
         hc = judge_human_centric_quality(self.judge_llm, transcript_text)
         return CaseResult(
             case_id=case.case_id, specialty=case.specialty, ground_truth=case.ground_truth_diagnosis,
             method="app", predicted_diagnosis=result.final_diagnosis, accuracy_score=judged.score,
+            trace={**asdict(result), 'judge': judged.model_dump()},
             entropy_trajectory=result.entropy_trajectory,
             entropy_reduction=entropy_reduction(result.entropy_trajectory),
             accessibility=hc.accessibility, empathy=hc.empathy,
@@ -125,8 +136,11 @@ class EvaluationRunner:
                 logger.info("Case %d/%d [%s] method=%s", i + 1, len(cases), case.case_id, method)
                 try:
                     results.append(dispatch[method](case))
-                except Exception:
+                except Exception as exc:
                     logger.exception("Failed on case %s method %s", case.case_id, method)
+                    results.append(CaseResult(case.case_id, case.specialty,
+                        case.ground_truth_diagnosis, method, '', None,
+                        status='failed', error=type(exc).__name__ + ': ' + str(exc)))
         return results
 
     @staticmethod
@@ -140,6 +154,7 @@ class EvaluationRunner:
             for r in results:
                 row = asdict(r)
                 row["entropy_trajectory"] = json.dumps(row["entropy_trajectory"])
+                row['trace'] = json.dumps(row['trace'], ensure_ascii=False)
                 writer.writerow(row)
 
     @staticmethod
@@ -156,11 +171,15 @@ class EvaluationRunner:
             by_method.setdefault(r.method, []).append(r)
         summary = {}
         for method, rs in by_method.items():
+            attempted = len(rs)
+            rs = [r for r in rs if r.status == 'success']
             n = len(rs)
             summary[method] = {
                 "n_cases": n,
-                "mean_accuracy": sum(r.accuracy_score for r in rs) / n if n else 0.0,
-                "mean_entropy_reduction": sum(r.entropy_reduction for r in rs) / n if n else 0.0,
+                'n_attempted': attempted,
+                'n_failed': attempted - n,
+                "mean_accuracy": _safe_mean([r.accuracy_score for r in rs]),
+                "mean_entropy_reduction": _safe_mean([r.entropy_reduction for r in rs if r.entropy_trajectory]),
                 "mean_accessibility": _safe_mean([r.accessibility for r in rs]),
                 "mean_empathy": _safe_mean([r.empathy for r in rs]),
                 "mean_relevant_response": _safe_mean([r.relevant_response for r in rs]),
@@ -171,4 +190,4 @@ class EvaluationRunner:
 
 def _safe_mean(values: List[Optional[int]]) -> float:
     vals = [v for v in values if v is not None]
-    return sum(vals) / len(vals) if vals else 0.0
+    return sum(vals) / len(vals) if vals else None

@@ -1,22 +1,9 @@
-"""
-Shannon-entropy-based Bayesian active question selection: Equations (4)-(5).
+"""Scoring according to the paper's printed Equations 3-5.
 
-WHY entropy: entropy of a probability distribution quantifies how
-*uncertain* it is -- a peaked distribution (one disease dominant) has
-low entropy, a flat/uniform distribution has high entropy. The paper
-uses this as a proxy for diagnostic confidence (Section 3.4.2).
-
-WHY minimum expected entropy determines the question: for each
-candidate follow-up question q_k, we don't know in advance what the
-patient will answer, but we can *simulate* plausible answers (Section
-2.5) and compute what the resulting disease distribution P(d_i | q_k)
-would look like on average (Eq. 3). The question whose *expected*
-resulting distribution is most peaked (lowest entropy, Eq. 4) is the
-one expected to be most informative -- i.e. to most reduce diagnostic
-uncertainty. Choosing q*_{t+1} = argmin_k H_{q_k} (Eq. 5) is a concrete,
-inspectable instantiation of Bayesian active learning / maximum
-expected information gain, rather than an LLM "vibe check" of which
-question seems best.
+This is entropy of an aggregated virtual distribution, NOT standard expected
+posterior entropy. If response likelihoods form a complete normalized partition,
+aggregation recovers the prior and cannot distinguish questions. Keep this as the
+paper-formula baseline; evaluate standard expected information gain separately.
 """
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 # Knowledge base data
 
 `sample_diseases.json` is a small, **hand-written, original** set of
-illustrative disease entries (12 conditions loosely matching the ones
+illustrative disease entries (11 conditions loosely matching the ones
 that appear as examples in the paper's Figure 1/Figure 3 case studies)
 used so that the pipeline is runnable out of the box, in mock mode, and
 in unit tests. **It is not copied or scraped from the MSD Manual and is
@@ -42,3 +42,5 @@ python scripts/build_index.py --kb data/knowledge_base/your_file.json
 
 to (re)build the RAG index used for symptom mapping and grounding
 retrieval (`askpatients.rag`).
+
+Optional provenance fields: `source_url`, `source_title`, and `source_section`. These are saved in dialogue traces. The sample entries have none; no citations are fabricated.

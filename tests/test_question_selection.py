@@ -1,18 +1,7 @@
-"""
-NOTE on test design: Equation (3) of the paper, as written, marginalizes
-over hypothesized responses by an *unweighted* sum:
-    P(d_i | q_k) = sum_l P(r_k^l, d_i) / sum_j sum_l P(r_k^l, d_j)
-It does not multiply by an explicit prior probability of each response
-occurring. One consequence (a property of the paper's formula itself,
-not a bug in this reproduction) is that a *perfectly symmetric* set of
-hypothesized responses -- e.g. one response that strongly favors disease
-A and another, equally-weighted, response that strongly favors disease B
-by the same margin -- averages back out to the prior, since the two
-hypothesized scenarios cancel. A genuinely informative question, in
-practice, skews the *aggregate* mass toward one outcome (its plausible
-responses don't cancel symmetrically); the tests below use that more
-realistic, asymmetric shape to exercise the "more informative -> lower
-expected entropy -> selected" behavior end-to-end.
+"""Tests for the paper's printed aggregate-entropy question selection.
+
+Lower aggregate entropy does not establish greater expected information gain.
+The perfect-discriminator regression explicitly demonstrates that limitation.
 """
 import math
 import sys
@@ -40,6 +29,14 @@ def test_uninformative_question_leaves_entropy_at_uniform_prior():
     ]
     h = _entropy_for_candidate(prior, q_responses)
     assert math.isclose(h, math.log(2), rel_tol=1e-6)
+
+
+def test_paper_formula_ties_perfect_discriminator_with_uninformative_question():
+    """Preserve the published formula without claiming it implements expected IG."""
+    prior = {'A': .5, 'B': .5}
+    perfect = _entropy_for_candidate(prior, [{'A': 1., 'B': 0.}, {'A': 0., 'B': 1.}])
+    useless = _entropy_for_candidate(prior, [{'A': .5, 'B': .5}, {'A': .5, 'B': .5}])
+    assert math.isclose(perfect, useless)
 
 
 def test_consistently_skewed_question_lowers_entropy_below_uniform():

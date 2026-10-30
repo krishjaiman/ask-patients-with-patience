@@ -18,7 +18,10 @@ _SYSTEM_PROMPT = (
     "free-text description and a controlled vocabulary of known symptoms, "
     "identify which vocabulary symptoms are being described (map colloquial "
     "language to clinical terms). Only use symptoms from the provided "
-    "vocabulary plus close paraphrases. Respond with JSON: "
+    "vocabulary plus close paraphrases. Preserve symptoms explicitly reported by "
+    "the patient earlier in the conversation. Doctor questions alone do not establish "
+    "symptoms. Exclude denied symptoms; an unknown answer does not retract earlier "
+    "confirmed symptoms. Respond with JSON: "
     '{"symptoms": ["symptom one", "symptom two", ...]}.'
 )
 
@@ -33,7 +36,6 @@ class SymptomMapper:
 
     def map_dialogue_to_symptoms(self, dialogue_text: str) -> List[str]:
         retrieved = self.retriever.query(dialogue_text, top_k=self.top_k)
-        vocab = sorted({c.disease for c, _ in retrieved})  # disease names as weak proxy
         # Pull the actual symptom vocabulary from retrieved chunk text as well,
         # since chunks are built from DiseaseEntry.as_grounding_text().
         retrieved_text = "\n---\n".join(c.text for c, _ in retrieved)
@@ -45,6 +47,7 @@ class SymptomMapper:
                 content=(
                     f"Patient dialogue so far:\n{dialogue_text}\n\n"
                     f"Relevant clinical-guideline context (retrieved via RAG):\n{retrieved_text}\n\n"
+                    f"Controlled symptom vocabulary: {self._vocab_from_chunks(retrieved_text)}\n\n"
                     "Extract the symptoms the patient is describing."
                 ),
             ),

@@ -16,6 +16,11 @@ def build_llm(cfg: LLMConfig) -> BaseLLM:
     if cfg.provider == "mock":
         from .mock_llm import MockLLM
         return MockLLM(**kwargs)
+    if cfg.provider == 'compatible':
+        from .compatible_llm import CompatibleLLM
+        return CompatibleLLM(base_url=cfg.base_url, api_key_env=cfg.api_key_env,
+            min_request_interval=cfg.min_request_interval, max_api_calls=cfg.max_api_calls,
+            response_cache=cfg.response_cache, reasoning_effort=cfg.reasoning_effort, **kwargs)
     if cfg.provider == "openai":
         from .openai_llm import OpenAILLM
         return OpenAILLM(**kwargs)

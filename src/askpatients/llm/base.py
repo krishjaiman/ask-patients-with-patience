@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+class NonRetryableError(RuntimeError):
+    """Configuration, budget or quota failure that retries cannot repair now."""
+
+
 @dataclass
 class LLMMessage:
     role: str  # "system" | "user" | "assistant"
@@ -63,6 +67,8 @@ class BaseLLM(ABC):
         for attempt in range(self.max_retries):
             try:
                 return self._complete(messages)
+            except NonRetryableError:
+                raise
             except Exception as exc:  # noqa: BLE001 - broad on purpose, network calls
                 last_exc = exc
                 delay = self.retry_base_delay * (2 ** attempt)
@@ -93,7 +99,8 @@ class BaseLLM(ABC):
         return text[start:end + 1]
 
     def complete_structured(self, messages: List[LLMMessage], schema: Type[T],
-                             retries: int = 2, mock_context: Optional[dict] = None) -> T:
+                             retries: int = 2, mock_context: Optional[dict] = None,
+                             validation_context: Optional[dict] = None) -> T:
         """
         Ask the LLM to produce JSON conforming to `schema`, parse and validate it.
         On parse/validation failure, retries with an explicit correction message.
@@ -109,7 +116,7 @@ class BaseLLM(ABC):
             json_text = self._extract_json(resp.text)
             try:
                 data = json.loads(json_text)
-                return schema.model_validate(data)
+                return schema.model_validate(data, context=validation_context)
             except (json.JSONDecodeError, ValidationError) as exc:
                 last_err = exc
                 working_messages = working_messages + [

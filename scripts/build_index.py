@@ -27,6 +27,9 @@ def main() -> None:
     logger.info("Loaded knowledge base with %d disease entries", len(kb.entries))
     retriever = build_retriever(cfg, kb)
     logger.info("Built retriever with %d chunks", len(retriever.chunks))
+    if cfg.rag.embedding_provider == 'lexical':
+        logger.info('Lexical retrieval needs no persisted embedding index.')
+        return
     retriever.save(cfg.rag.index_path, cfg.rag.metadata_path)
     logger.info("Saved index to %s / metadata to %s", cfg.rag.index_path, cfg.rag.metadata_path)
 

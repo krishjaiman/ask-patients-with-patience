@@ -30,6 +30,12 @@ class LLMConfig:
     max_retries: int = 5
     retry_base_delay: float = 1.5
     request_timeout: float = 60.0
+    base_url: Optional[str] = None
+    api_key_env: str = 'LLM_API_KEY'
+    min_request_interval: float = 0.0
+    max_api_calls: int = 100
+    response_cache: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 @dataclass
@@ -57,13 +63,15 @@ class AppAlgoConfig:
     max_dialogue_turns: int = 6               # iterative questioning rounds
     top_n_diseases_for_questions: int = 8      # diseases considered when building Q_{t+1}
     min_prob_floor: float = 1e-6              # numerical floor to avoid log(0) / div0
+    belief_update: str = "dialogue"  # dialogue | bayesian (legacy approximation)
 
-
-@dataclass
-class PatientSimConfig:
-    persona_model_provider: str = "mock"
-    max_turns_patient_will_answer: int = 6
-    reveal_diagnosis: bool = False  # patient agent must never leak ground truth
+    def __post_init__(self):
+        if self.belief_update not in {'dialogue', 'bayesian'}:
+            raise ValueError('belief_update must be dialogue or bayesian')
+        if not 2 <= self.min_responses_per_question <= self.max_responses_per_question <= 5:
+            raise ValueError('Require 2 <= min_responses <= max_responses <= 5')
+        if self.num_candidate_questions < 1 or self.max_dialogue_turns < 0 or self.top_n_diseases_for_questions < 1:
+            raise ValueError('Invalid question, turn, or candidate disease count')
 
 
 @dataclass
@@ -86,9 +94,11 @@ class PathsConfig:
 @dataclass
 class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
+    profile_llm: Optional[LLMConfig] = None
+    patient_llm: Optional[LLMConfig] = None
+    judge_llm: Optional[LLMConfig] = None
     rag: RAGConfig = field(default_factory=RAGConfig)
     algo: AppAlgoConfig = field(default_factory=AppAlgoConfig)
-    patient: PatientSimConfig = field(default_factory=PatientSimConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
     seed: int = 42
@@ -114,17 +124,24 @@ class Config:
     @classmethod
     def load(cls, path: Optional[str] = None, overrides: Optional[dict] = None) -> "Config":
         base = asdict(cls())
-        if path and Path(path).exists():
+        if path and not Path(path).exists():
+            raise FileNotFoundError(f'Configuration not found: {path}')
+        if path:
             with open(path, "r") as f:
                 file_cfg = yaml.safe_load(f) or {}
             base = cls._merge(base, file_cfg)
         if overrides:
             base = cls._merge(base, overrides)
+        unknown = set(base) - set(asdict(cls()))
+        if unknown:
+            raise ValueError(f'Unknown configuration sections: {sorted(unknown)}. Use profile_llm/patient_llm/judge_llm for model roles.')
         return cls(
             llm=LLMConfig(**base["llm"]),
+            profile_llm=LLMConfig(**base['profile_llm']) if base['profile_llm'] else None,
+            patient_llm=LLMConfig(**base['patient_llm']) if base['patient_llm'] else None,
+            judge_llm=LLMConfig(**base['judge_llm']) if base['judge_llm'] else None,
             rag=RAGConfig(**base["rag"]),
             algo=AppAlgoConfig(**base["algo"]),
-            patient=PatientSimConfig(**base["patient"]),
             eval=EvalConfig(**base["eval"]),
             paths=PathsConfig(**base["paths"]),
             seed=base["seed"],

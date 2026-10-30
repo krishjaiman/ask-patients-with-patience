@@ -1,0 +1,24 @@
+# Groq free-tier example, verified against official docs on 2026-10-06.
+# Stay on the Free plan. Quotas/model availability depend on your account.
+# This is a reduced demonstration setting, NOT the paper's full experiment.
+llm:
+  provider: compatible
+  base_url: https://api.groq.com/openai/v1
+  api_key_env: GROQ_API_KEY
+  model: openai/gpt-oss-20b
+  reasoning_effort: low
+  temperature: 0.0
+  max_tokens: 2048
+  request_timeout: 120
+  min_request_interval: 15
+  max_api_calls: 80
+  response_cache: outputs/llm_cache
+rag:
+  embedding_provider: lexical
+algo:
+  num_candidate_questions: 3
+  min_responses_per_question: 2
+  max_responses_per_question: 2
+  max_dialogue_turns: 3
+  top_n_diseases_for_questions: 5
+  belief_update: dialogue

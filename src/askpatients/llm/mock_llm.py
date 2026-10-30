@@ -49,10 +49,12 @@ class MockLLM(BaseLLM):
         return LLMResponse(text=f"[mock free-text reply #{rnd.randint(0, 10**6)}]")
 
     def complete_structured(self, messages: List[LLMMessage], schema: Type[T],
-                             retries: int = 2, mock_context: Optional[dict] = None) -> T:
+                             retries: int = 2, mock_context: Optional[dict] = None,
+                             validation_context: Optional[dict] = None) -> T:
         prompt_key = "||".join(m.content for m in messages)
         rnd = _stable_seed(self.model, prompt_key)
-        return _mock_fill_schema(schema, rnd, mock_context or {})
+        result = _mock_fill_schema(schema, rnd, mock_context or {})
+        return schema.model_validate(result.model_dump(), context=validation_context)
 
 
 def _dirichlet_like(rnd: random.Random, n: int) -> List[float]:
@@ -116,9 +118,14 @@ def _mock_fill_schema(schema: Type[T], rnd: random.Random, ctx: dict) -> T:
         return schema(probabilities=dict(zip(diseases, vals)))
 
     if name == "PatientProfileLLMResult":
+        facts = [
+            {"category": "symptom", "statement": line[9:].strip(), "evidence": line[9:].strip()}
+            for line in ctx.get("transcript", "").splitlines()
+            if line.startswith("Patient: ") and line[9:].strip()
+        ]
         return schema(
-            age=rnd.randint(18, 75),
-            gender=rnd.choice(["female", "male"]),
+            age=None,
+            gender="unspecified",
             intention=rnd.choice([
                 "wants a quick answer", "anxious and wants reassurance",
                 "curious about the cause", "wants to know if this is serious",
@@ -127,15 +134,12 @@ def _mock_fill_schema(schema: Type[T], rnd: random.Random, ctx: dict) -> T:
                 "terse and to the point", "chatty and detail-oriented",
                 "anxious", "calm and matter-of-fact",
             ]),
-            background_details=["works a desk job", "lives alone"],
+            background_details=[],
+            clinical_facts=facts,
         )
 
     if name == "PatientAnswerResult":
-        options = ctx.get("candidate_responses")
-        if options:
-            return schema(answer=rnd.choice(options), reveals_diagnosis=False)
-        return schema(answer="It's hard to describe, but it's been bothering me.",
-                       reveals_diagnosis=False)
+        return schema(fact_indices=[0] if ctx.get('fact_count', 0) else [], unknown=True)
 
     if name == "NaiveFollowUpResult":
         pool = [

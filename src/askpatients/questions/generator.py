@@ -105,17 +105,13 @@ class QuestionGenerator:
                 "min_l": self.cfg.min_responses_per_question,
                 "max_l": self.cfg.max_responses_per_question,
             },
+            validation_context={"min_responses": self.cfg.min_responses_per_question,
+                                "max_responses": self.cfg.max_responses_per_question},
         )
-        responses = result.responses[: self.cfg.max_responses_per_question]
-        if len(responses) < self.cfg.min_responses_per_question:
-            # Guarantee the L >= 2 lower bound even if the LLM under-produced.
-            responses += [f"(no further detail beyond: {question})"] * (
-                self.cfg.min_responses_per_question - len(responses)
-            )
-        return responses
+        return result.responses
 
     def estimate_conditional_probabilities(self, question: str, response: str,
-                                            diseases: List[str]) -> Dict[str, float]:
+                                            diseases: List[str], dialogue_text: str = "") -> Dict[str, float]:
         """P(r_k^l | Gamma(d_i)) for every candidate disease -- the raw input
         to Eq. 2's joint-probability computation (askpatients.bayesian)."""
         grounding = self._diagnosis_grounding(diseases, causes_only=True)
@@ -124,6 +120,7 @@ class QuestionGenerator:
             LLMMessage(
                 role="user",
                 content=(
+                    f"Prior dialogue (condition on this; do not recount old evidence):\n{dialogue_text}\n\n"
                     f"Question asked: \"{question}\"\n"
                     f"Hypothetical patient response: \"{response}\"\n\n"
                     f"Candidate diseases and grounded context:\n{grounding}\n\n"
@@ -134,6 +131,7 @@ class QuestionGenerator:
         result: ConditionalProbabilityResult = self.llm.complete_structured(
             messages, ConditionalProbabilityResult,
             mock_context={"diseases": diseases, "response": response},
+            validation_context={"diseases": diseases},
         )
         return {d: float(result.probabilities.get(d, 0.0)) for d in diseases}
 

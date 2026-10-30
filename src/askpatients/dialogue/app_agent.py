@@ -1,21 +1,9 @@
-"""
-Dr.APP: the full per-turn pipeline of Section 2 / Figure 2 of the paper,
-wired together from the (independently testable) building blocks:
+"""Dr.APP pipeline: grounded symptom mapping, disease estimates, candidate
+questions, hypothetical answers, printed paper scoring, and patient-facing rewrite.
 
-  askpatients.medical.mapping.SymptomMapper        -- Section 2.2
-  askpatients.medical.diagnosis.DiagnosisEngine     -- Section 2.3, Eq. 1
-  askpatients.questions.generator.QuestionGenerator -- Sections 2.4-2.5
-  askpatients.bayesian.probability / entropy        -- Eq. 2-5
-  askpatients.dialogue.humanize.HumanCentricRewriter -- Section 2.7
-
-IMPLEMENTATION DECISION (undocumented in the paper): the candidate
-disease set D = {d_i} is fixed once at dialogue initialization from the
-symptoms present in the opening exchange S_1, rather than being
-recomputed from scratch every turn. Only the *probabilities* P_t(D)
-evolve turn-to-turn via Bayesian updating. This matches Eq. 1's framing
-of D as "the set of possible diseases" (a fixed index set) and keeps
-the entropy trajectory (Fig. 4) meaningful -- entropy over a shifting
-support set is not directly comparable across turns.
+The candidate disease support is fixed at initialization, a documented limitation.
+Observed answers default to full-dialogue probability estimation. The legacy
+recursive Bayesian approximation remains available through belief_update.
 """
 from __future__ import annotations
 
@@ -55,6 +43,8 @@ class DrAPPStepResult:
     prior_distribution: Distribution
     top_diagnosis: str
     top_diagnosis_prob: float
+    question_evidence: Dict[str, dict] = field(default_factory=dict)
+    grounding: List[dict] = field(default_factory=list)
 
 
 class DrAPP:
@@ -77,7 +67,7 @@ class DrAPP:
         """S_1 = (q_1, r_1) -> initial symptoms, disease set D, and P_1(D)."""
         dialogue_text = f"Doctor: {opening_question}\nPatient: {opening_response}"
         symptoms = self.symptom_mapper.map_dialogue_to_symptoms(dialogue_text)
-        diseases = self.diagnosis_engine.candidate_disease_set(symptoms)
+        diseases = self.diagnosis_engine.candidate_disease_set(symptoms, opening_response)
         distribution = self.diagnosis_engine.initial_distribution(dialogue_text, symptoms, diseases)
         return DrAPPState(
             dialogue_text=dialogue_text, symptoms=symptoms, diseases=diseases,
@@ -104,16 +94,21 @@ class DrAPP:
             raise RuntimeError("Question generator produced no candidate questions.")
 
         entropies: Dict[str, float] = {}
+        evidence = {}
         for q in candidate_questions:
             responses = self.question_generator.generate_possible_responses(q, state.dialogue_text)
             per_response_joints = []
+            likelihoods = []
             for r in responses:
                 cond_probs = self.question_generator.estimate_conditional_probabilities(
-                    q, r, state.diseases,
+                    q, r, state.diseases, state.dialogue_text,
                 )
+                likelihoods.append(cond_probs)
                 per_response_joints.append(joint_probability(cond_probs, state.distribution))
             h, _posterior = expected_entropy_for_question(per_response_joints)
             entropies[q] = h
+            evidence[q] = {'responses': responses, 'likelihoods': likelihoods,
+                           'virtual_posterior': _posterior, 'paper_entropy': h}
 
         q_star = select_min_entropy_question(entropies)
         human_q = self.humanizer.rewrite(q_star, state.dialogue_text)
@@ -127,23 +122,28 @@ class DrAPP:
             prior_distribution=dict(state.distribution),
             top_diagnosis=top_disease,
             top_diagnosis_prob=top_prob,
+            question_evidence=evidence,
+            grounding=[self.kb.get(d).__dict__.copy() for d in state.diseases if self.kb.get(d)],
         )
 
     # ---------------------------------------------------- observe response
     def observe_response(self, state: DrAPPState, question_asked: str,
                           patient_response: str) -> DrAPPState:
         """
-        Incorporates the ACTUAL patient response r_{t+1}: forms S_{t+1} and
-        updates P_{t+1}(D) via Bayes' rule (see
-        bayesian.probability.bayesian_update_with_observed_response).
+        Incorporate the actual question as seen by the patient and the answer.
+        Default: estimate from full dialogue (Section 2.3 conditioning).
+        Optional legacy mode: recursive Bayesian likelihood multiplication.
         """
-        cond_probs = self.question_generator.estimate_conditional_probabilities(
-            question_asked, patient_response, state.diseases,
-        )
-        new_distribution = bayesian_update_with_observed_response(
-            state.distribution, cond_probs, floor=self.cfg.min_prob_floor,
-        )
         new_dialogue = state.dialogue_text + f"\nDoctor: {question_asked}\nPatient: {patient_response}"
+        if self.cfg.belief_update == 'dialogue':
+            state.symptoms = self.symptom_mapper.map_dialogue_to_symptoms(new_dialogue)
+            new_distribution = self.diagnosis_engine.initial_distribution(
+                new_dialogue, state.symptoms, state.diseases)
+        else:
+            cond_probs = self.question_generator.estimate_conditional_probabilities(
+                question_asked, patient_response, state.diseases, state.dialogue_text)
+            new_distribution = bayesian_update_with_observed_response(
+                state.distribution, cond_probs, floor=self.cfg.min_prob_floor)
         state.dialogue_text = new_dialogue
         state.distribution = new_distribution
         state.turn += 1

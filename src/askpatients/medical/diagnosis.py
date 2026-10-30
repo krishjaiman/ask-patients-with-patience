@@ -1,16 +1,6 @@
-"""
-Section 2.3 "Diagnosis Probability Prediction": builds the candidate
-disease set D and the initial/updated LLM-proposed distribution
-P_t(D | Gamma(S_MSD), S_t) (Equation 1).
-
-The LLM here supplies a *proposal* distribution grounded in retrieved
-causes/pathophysiology text (Gamma(S_MSD)); askpatients.bayesian.probability
-.normalize_distribution then enforces the sum-to-1 constraint from Eq. 1
-and applies the numerical floor used throughout the rest of the pipeline.
-Subsequent turns update this distribution via Bayesian posterior updates
-(askpatients.bayesian.probability.bayesian_update_with_observed_response),
-NOT by re-asking the LLM for a fresh guess each turn -- that is what
-keeps the "confidence" trajectory (Section 3.4.2 / Figure 4) meaningful.
+"""Section 2.3: LLM-proposed disease weights conditioned on dialogue and
+clinical context, normalized into a distribution. Used initially and after each
+answer in dialogue update mode. These estimates are not calibrated probabilities.
 """
 from __future__ import annotations
 
@@ -43,21 +33,23 @@ class DiagnosisEngine:
         self.min_prob_floor = min_prob_floor
         self.top_n_diseases = top_n_diseases
 
-    def candidate_disease_set(self, symptoms: List[str]) -> List[str]:
+    def candidate_disease_set(self, symptoms: List[str], patient_text: str = "") -> List[str]:
         """Builds D = {d_i} by retrieving diseases whose grounding text is
         relevant to the extracted/observed symptoms so far."""
-        if not symptoms:
-            return self.kb.all_disease_names()[: self.top_n_diseases]
-        query = "; ".join(symptoms)
+        query = "; ".join(symptoms) or patient_text.strip()
+        if not query:
+            raise ValueError("Cannot retrieve candidate diseases without patient evidence")
         retrieved = self.retriever.query(query, top_k=self.top_n_diseases * 3)
         seen: List[str] = []
-        for chunk, _ in retrieved:
+        for chunk, score in retrieved:
+            if score <= 0:
+                continue
             if chunk.disease not in seen:
                 seen.append(chunk.disease)
             if len(seen) >= self.top_n_diseases:
                 break
         if not seen:
-            seen = self.kb.all_disease_names()[: self.top_n_diseases]
+            raise ValueError("No relevant candidate diseases found in the knowledge base")
         return seen
 
     def initial_distribution(self, dialogue_text: str, symptoms: List[str],
@@ -78,6 +70,7 @@ class DiagnosisEngine:
         ]
         result: DiseaseProbabilityResult = self.llm.complete_structured(
             messages, DiseaseProbabilityResult, mock_context={"diseases": diseases},
+            validation_context={"diseases": diseases},
         )
         # Ensure every candidate disease has an entry even if the LLM omitted one.
         raw = {d: result.probabilities.get(d, 0.0) for d in diseases}

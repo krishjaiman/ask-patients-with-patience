@@ -21,6 +21,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import hashlib
+from dataclasses import asdict
 from pathlib import Path
 
 from _common import (
@@ -52,11 +54,20 @@ def main() -> None:
     logger.info("Evaluating %d cases with methods=%s", len(cases), args.methods)
 
     llm = build_llm_from_config(cfg)
-    judge_llm = llm  # Section 3.4 uses separate human raters; here judge shares the LLM backend.
+    judge_llm = build_llm_from_config(cfg, 'judge_llm')
     kb = build_knowledge_base(cfg, args.kb)
+    manifest = {'config': asdict(cfg),
+        'dataset_sha256': hashlib.sha256(Path(args.cases).read_bytes()).hexdigest(),
+        'knowledge_base': [asdict(e) for e in kb.entries],
+        'methods': args.methods, 'case_ids': [c.case_id for c in cases],
+        'exact_label_kb_coverage': sum(c.ground_truth_diagnosis in kb.all_disease_names() for c in cases),
+        'evaluation': 'LLM judge approximation; mock scores are not research results'}
+    (out_dir / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
     retriever = build_retriever(cfg, kb)
 
-    runner = EvaluationRunner(cfg, llm, judge_llm, kb, retriever)
+    runner = EvaluationRunner(cfg, llm, judge_llm, kb, retriever,
+        profile_llm=build_llm_from_config(cfg, 'profile_llm'),
+        patient_llm=build_llm_from_config(cfg, 'patient_llm'))
     results = runner.run_all(cases, args.methods)
 
     runner.write_csv(results, out_dir / "results.csv")
@@ -74,6 +85,8 @@ def main() -> None:
 
     _maybe_plot_entropy(results, out_dir)
     logger.info("Wrote results to %s", out_dir)
+    if any(r.status == 'failed' for r in results):
+        raise SystemExit('Evaluation incomplete: failed cases are recorded in results.json')
 
 
 def _maybe_plot_entropy(results, out_dir: Path) -> None:

@@ -18,7 +18,7 @@ from _common import add_common_args, build_knowledge_base, build_llm_from_config
 from askpatients.data.remedi_loader import load_remedi_raw
 from askpatients.dialogue.baselines import NaiveMultiTurnBaseline, OneShotBaseline
 from askpatients.dialogue.orchestrator import NaiveMultiTurnOrchestrator
-from askpatients.patient.profile import build_profile_from_case
+from askpatients.patient.store import get_profile
 from askpatients.patient.simulator import PatientSimulator
 
 logger = logging.getLogger(__name__)
@@ -34,18 +34,18 @@ def main() -> None:
 
     cfg = load_config(args)
     cases = load_remedi_raw(args.case)
+    if not cases:
+        parser.error('The case file is empty')
     case = next((c for c in cases if c.case_id == args.case_id), cases[0]) if args.case_id else cases[0]
+    if args.case_id and case.case_id != args.case_id:
+        parser.error(f'Unknown case ID: {args.case_id}')
     logger.info("Running case %s (ground truth: %s) with method=%s",
                 case.case_id, case.ground_truth_diagnosis, args.method)
 
     llm = build_llm_from_config(cfg)
     kb = build_knowledge_base(cfg, args.kb)
-    profile = build_profile_from_case(
-        llm, case_id=case.case_id, transcript=case.full_transcript_text(),
-        presenting_complaint=case.opening_patient_turn(), symptoms=[],
-        ground_truth_diagnosis=case.ground_truth_diagnosis,
-    )
-    patient = PatientSimulator(llm, profile)
+    profile = get_profile(build_llm_from_config(cfg, 'profile_llm'), case)
+    patient = PatientSimulator(build_llm_from_config(cfg, 'patient_llm'), profile)
 
     if args.method == "one_shot":
         baseline = OneShotBaseline(llm, kb)

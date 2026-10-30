@@ -1,66 +1,16 @@
-# ReMeDi dataset
+# ReMeDi data and provenance
 
-This repository does **not** bundle the ReMeDi dataset. ReMeDi
-("Resources for multi-domain, multi-service, medical dialogues") was
-introduced by Yan, Pei, Ren, Ren, Xin, Liang, de Rijke, and Chen at
-SIGIR 2022:
+The authors publicly release ReMeDi-base under their repository's MIT license statement:
+https://github.com/yanguojun123/Medical-Dialogue
 
-> Guojun Yan, Jiahuan Pei, Pengjie Ren, Zhaochun Ren, Xin Xin, Huasheng
-> Liang, Maarten de Rijke, Zhumin Chen. "ReMeDi: Resources for
-> Multi-domain, Multi-service, Medical Dialogues." SIGIR 2022.
+Verified and downloaded on 2026-10-06:
+- data/ReMeDi-base.json: https://github.com/yanguojun123/Medical-Dialogue/blob/main/data/ReMeDi-base.json
+- License: https://github.com/yanguojun123/Medical-Dialogue/blob/main/MIT-license.txt
 
-## Obtaining the data
+The raw JSON and license are stored locally under `raw/`, excluded from Git. The release contains 1,557 Chinese conversations. Downloaded bytes are fingerprinted in the preprocessing audit output.
 
-Obtain ReMeDi-base from its original release (check the paper / the
-authors' repository for the current distribution link and license
-terms) and place the raw export under `data/remedi/raw/`.
+The official adapter supports `dialogue`, `information`, `sentence`, and each turn's `actions`. All doctor intents are retained and normalized. One distinct annotated disease becomes a provisional reference label; ambiguous/missing diagnoses are not guessed. Specialties are not present in the inspected records and are left empty.
 
-## Expected schema
+The strict reading of APP's filter returns zero records on this release, not 329. A separate `single_diagnosis` policy yields 280 candidates (386 contain a Diagnosis action). Do not present the generated 100-case provisional subset as the authors' exact benchmark. It still requires label review, language handling and guideline coverage.
 
-`askpatients.data.remedi_loader.load_remedi_raw` expects either a
-`.jsonl` file (one case per line) or a single `.json` array file, with
-records shaped like:
-
-```json
-{
-  "case_id": "12345",
-  "specialty": "Gastroenterology",
-  "ground_truth_diagnosis": "Gastroesophageal Reflux Disease",
-  "turns": [
-    {"role": "patient", "text": "I've had heartburn for a week."},
-    {"role": "doctor", "text": "Does it get worse after eating?", "action": "Diagnosis"},
-    {"role": "patient", "text": "Yes, especially at night."}
-  ]
-}
-```
-
-If your actual ReMeDi export uses different field names (e.g.
-`dialogue` instead of `turns`, `department` instead of `specialty`),
-either rename them to match this schema, or adapt the single adapter
-function `_coerce_case` in
-`src/askpatients/data/remedi_loader.py` -- that is the one place the
-rest of the pipeline depends on for field names.
-
-## Preprocessing pipeline (Section 3.1 of the paper)
-
-```bash
-python scripts/prepare_dataset.py \
-  --raw data/remedi/raw/remedi_base.jsonl \
-  --out data/processed/remedi_diagnosis_only.jsonl \
-  --eval-out data/processed/remedi_eval_100.jsonl \
-  --eval-n 100 --seed 42
-```
-
-This filters ReMeDi-base down to cases whose doctor turns are
-exclusively labeled `"Diagnosis"` (329 cases in the paper) and then
-randomly samples 100 of them (seeded, so the same 100 cases are
-selected every run with the default seed) for the evaluation subset,
-exactly as Section 3.1 describes.
-
-## Synthetic smoke-test data
-
-`data/remedi/synthetic_sample.jsonl` contains a handful of **entirely
-synthetic, hand-written** mini-cases (NOT real ReMeDi data) in the
-expected schema, used only so `scripts/prepare_dataset.py`,
-`scripts/run_app.py --mock`, and the test suite can run end-to-end
-without requiring the real dataset.
+Run the command documented in the root README to regenerate data and the audit JSON. The eight cases in `synthetic_sample.jsonl` are original English examples, not ReMeDi data.

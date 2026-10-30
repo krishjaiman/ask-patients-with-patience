@@ -23,7 +23,9 @@ _HUMANIZE_SYSTEM = (
     "abstract clinical terms (e.g. instead of 'have you had any dietary "
     "triggers', ask about specific foods like milk or ice cream). Keep a "
     "warm, understanding, conversational tone, as if talking with a "
-    "trusted friend. Respond with ONLY the rewritten question/message, no "
+    "trusted friend. Preserve the question's clinical meaning, time frame and "
+    "answer options. Do not add diagnostic claims or additional questions. Use "
+    "the patient's language. Respond with ONLY the rewritten question/message, no "
     "preamble, no quotation marks."
 )
 

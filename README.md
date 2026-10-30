@@ -1,395 +1,110 @@
 # AskPatients
 
-A from-scratch **research reproduction** of:
+Research implementation of **Ask Patients with Patience: Enabling LLMs for Human-Centric Medical Dialogue with Grounded Reasoning** (EMNLP 2025).
 
-> Jiayuan Zhu, Jiazhen Pan, Yuyuan Liu, Fenglin Liu, Junde Wu. **"Ask
-> Patients with Patience: Enabling LLMs for Human-Centric Medical
-> Dialogue with Grounded Reasoning."** EMNLP 2025, pages 2846-2857.
+This is an educational prototype. Mock runs verify software behavior, not diagnostic accuracy. A successful real-provider demo and a reproduction of the published experiments are separate milestones.
 
-This codebase implements **Dr.APP**: a multi-turn LLM medical dialogue
-agent that (1) grounds its reasoning in clinical guideline text, (2)
-represents its diagnosis as an explicit, Bayesian-updated probability
-distribution over candidate diseases, (3) selects each follow-up
-question via **entropy-minimizing Bayesian active learning** rather
-than LLM "vibes", and (4) rewrites the selected question into
-empathetic, jargon-free language before asking the (simulated)
-patient.
+## Quick start (Windows PowerShell)
 
-> **⚠️ Research / educational use only.** This is not a medical device,
-> not clinically validated, and not a substitute for professional
-> medical advice. See [Disclaimer](#disclaimer).
+Use the existing virtual environment from the project root:
 
----
-
-## Table of contents
-
-- [Paper overview](#paper-overview)
-- [Architecture](#architecture)
-- [Paper → code mapping](#paper--code-mapping)
-- [Installation](#installation)
-- [Dataset setup (ReMeDi)](#dataset-setup-remedi)
-- [Medical knowledge setup](#medical-knowledge-setup)
-- [API / provider configuration](#api--provider-configuration)
-- [Running the system](#running-the-system)
-- [Running baselines](#running-baselines)
-- [Evaluation](#evaluation)
-- [Expected outputs](#expected-outputs)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
-- [Reproduction deviations](#reproduction-deviations--implementation-decisions)
-- [Disclaimer](#disclaimer)
-
----
-
-## Paper overview
-
-LLMs perform well on static medical QA benchmarks but struggle in real
-consultations because (a) they tend to diagnose from a single message
-without follow-up questions, (b) naive multi-turn prompting produces
-mechanical, un-grounded, un-prioritized question sequences, and (c)
-their reasoning is a black box with no notion of *how confident* a
-diagnosis is or *why* a particular follow-up question was asked.
-
-Dr.APP addresses this with an explicit probabilistic model:
-
-1. Map the dialogue so far to a normalized symptom set, grounded via
-   RAG retrieval over clinical-guideline text (MSD Manual in the
-   paper).
-2. Maintain a disease probability distribution `P_t(D)` over a
-   candidate disease set, grounded in each disease's retrieved
-   causes/pathophysiology.
-3. Generate a pool of candidate follow-up questions, grounded in each
-   disease's "Diagnosis" / "What a doctor does" guideline text.
-4. For each candidate question, simulate several plausible patient
-   responses and estimate `P(response | disease)` for each candidate
-   disease.
-5. Use Bayes' rule to compute the *expected* posterior distribution
-   for each candidate question, and its Shannon entropy.
-6. Ask the question with the **lowest expected entropy** (maximum
-   expected information gain) — this is the Bayesian active-learning
-   core of the method.
-7. Rewrite the selected question in warm, jargon-free, example-driven
-   language before presenting it to the patient.
-8. Once the real patient response arrives, Bayesian-update `P_t(D)`
-   and repeat.
-
-## Architecture
-
-```
-Patient dialogue
-    │
-    ▼
-Symptom extraction (RAG-grounded)              askpatients.medical.mapping
-    │
-    ▼
-Medical knowledge retrieval                     askpatients.rag
-    │
-    ▼
-Disease probability distribution P_t(D)        askpatients.medical.diagnosis
-    │
-    ▼
-Generate candidate questions Q_{t+1}           askpatients.questions.generator
-    │
-    ▼
-Generate possible responses per question        askpatients.questions.generator
-    │
-    ▼
-Estimate P(response | disease)                  askpatients.questions.generator
-    │
-    ▼
-Bayesian joint / posterior (Eq. 2-3)            askpatients.bayesian.probability
-    │
-    ▼
-Expected entropy per question (Eq. 4)           askpatients.bayesian.entropy
-    │
-    ▼
-Select min-entropy question (Eq. 5)             askpatients.bayesian.entropy
-    │
-    ▼
-Human-centric rewrite                           askpatients.dialogue.humanize
-    │
-    ▼
-Ask patient (simulated)                          askpatients.patient.simulator
-    │
-    ▼
-Receive response → Bayesian update → repeat     askpatients.dialogue.app_agent
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe scripts/run_app.py --mock --case data/remedi/synthetic_sample.jsonl --case-id SYN-001 --turns 3
+.\.venv\Scripts\python.exe scripts/chat.py --mock --turns 2
 ```
 
-The whole per-turn loop is orchestrated by `askpatients.dialogue.app_agent.DrAPP`,
-driven turn-by-turn by `askpatients.dialogue.orchestrator.DialogueOrchestrator`.
+For a fresh environment, create a Python 3.10+ virtual environment and install `requirements.txt`. Entry-point scripts add `src` to the import path automatically.
 
-**Critically, the Bayesian math (`askpatients/bayesian/`) contains no
-LLM calls.** LLM calls only ever *supply inputs* — a symptom list, a
-proposed prior distribution, candidate questions, plausible responses,
-per-disease response likelihoods. Every probability computation (joint
-probability, posterior, entropy, argmin selection) is deterministic
-Python, independently unit-tested in `tests/`.
+## Free hosted demo (no GPU required)
 
-## Paper → code mapping
+`configs/free_demo.yaml` uses Groq's chat-completions endpoint and a model listed in its Free-plan documentation as checked on 2026-10-06. It does not use a paid OpenAI API key. Provider availability and quotas must be confirmed for your account.
 
-| Paper section / equation | Code |
-|---|---|
-| §2.2 Mapping into MSD | `askpatients/medical/mapping.py` (`SymptomMapper`) |
-| §2.3 Diagnosis Probability Prediction, **Eq. 1** | `askpatients/medical/diagnosis.py` (`DiagnosisEngine`), `askpatients/bayesian/probability.py` (`normalize_distribution`) |
-| §2.4 Question Generation | `askpatients/questions/generator.py` (`QuestionGenerator.generate_candidate_questions`) |
-| §2.5 One-more Step Thinking & Conditional Probability, **Eq. 2** | `askpatients/questions/generator.py` (`generate_possible_responses`, `estimate_conditional_probabilities`), `askpatients/bayesian/probability.py` (`joint_probability`) |
-| §2.6 Question Selection, **Eq. 3-5** | `askpatients/bayesian/probability.py` (`posterior_given_question`), `askpatients/bayesian/entropy.py` (`shannon_entropy`, `expected_entropy_for_question`, `select_min_entropy_question`) |
-| §2.7 Human-Centric Communication | `askpatients/dialogue/humanize.py` (`HumanCentricRewriter`) |
-| §3.1 Dataset (ReMeDi filtering/sampling) | `askpatients/data/remedi_loader.py` |
-| §3.2 Patient Simulator | `askpatients/patient/profile.py`, `askpatients/patient/simulator.py` |
-| §3.3 Experimental Setup (K, L, turns) | `askpatients/config.py` (`AppAlgoConfig`), `configs/default.yaml` |
-| §3.4.1 Accuracy | `askpatients/evaluation/metrics.py` (`judge_diagnosis_accuracy`) — **LLM-judge approximation**, see below |
-| §3.4.2 Entropy | `askpatients/bayesian/entropy.py` (reused directly — faithfully reproduced) |
-| §3.4.3 Human-Centric | `askpatients/evaluation/metrics.py` (`judge_human_centric_quality`) — **LLM-judge approximation** |
-| Fig. 1(a) one-shot baseline | `askpatients/dialogue/baselines.py` (`OneShotBaseline`) |
-| Fig. 1(b) naive multi-turn baseline | `askpatients/dialogue/baselines.py` (`NaiveMultiTurnBaseline`) |
+1. Create a Free account at https://console.groq.com and create an API key.
+2. Add `GROQ_API_KEY=...` to your local `.env`. Keep existing entries. Never put the key in chat or commit it.
+3. Stay on the Free plan; do not enable paid billing for this setup.
+4. Check prerequisites, then run one synthetic case:
 
-## Installation
-
-Requires Python 3.10+.
-
-```bash
-git clone <this-repo>
-cd askpatients
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# Optional extras for a real (non-mock) run:
-pip install openai anthropic faiss-cpu sentence-transformers matplotlib
+```powershell
+.\.venv\Scripts\python.exe scripts/check_setup.py --config configs/free_demo.yaml
+.\.venv\Scripts\python.exe scripts/run_app.py --config configs/free_demo.yaml --case data/remedi/synthetic_sample.jsonl --case-id SYN-001 --turns 1
+.\.venv\Scripts\python.exe scripts/chat.py --config configs/free_demo.yaml
 ```
 
-No installation is required to explore the code offline: every script
-supports `--mock`, which uses `MockLLM` and `MockEmbedder` (no network,
-no API key) so you can run the entire pipeline immediately.
+The compatible adapter uses Python's standard library, so no extra SDK is needed. The free configuration uses three candidate questions, two hypothetical responses each, three follow-up rounds, and up to five candidate diseases. These are **reduced demo settings**, not the paper's full experiment. See [PRESENTATION.md](PRESENTATION.md) for the saved-report workflow and presentation notes.
 
-## Dataset setup (ReMeDi)
+Requests are paced 15 seconds apart across roles sharing an endpoint/model. Successful completions are cached under `outputs/llm_cache`, and uncached HTTP attempts are capped at 80 per endpoint/model per process. Quota/authentication errors stop rather than invoking a paid fallback. The cap is not a currency limit: remain on the provider's Free plan. Cache hits replay prior responses and must not be treated as independent experimental repeats.
 
-This repository does **not** bundle the ReMeDi dataset (Yan et al.,
-2022, SIGIR) — see [`data/remedi/README.md`](data/remedi/README.md)
-for how to obtain it and the exact expected schema. Once you have a
-raw export:
+Retrieval in this configuration is local BM25 keyword matching (`lexical`), not semantic embeddings. It requires no model downloads or GPU. Semantic retrieval can later use a CPU sentence-transformer with the optional `sentence-transformers` dependency and a matching `rag.embedding_model`. Mock embeddings remain available for tests only.
 
-```bash
-python scripts/prepare_dataset.py \
-  --raw data/remedi/raw/remedi_base.jsonl \
-  --out data/processed/remedi_diagnosis_only.jsonl \
-  --eval-out data/processed/remedi_eval_100.jsonl \
-  --eval-n 100 --seed 42
+For a local chat-completions server, configure `llm.provider: compatible`, its `base_url`, and its installed `model` name. Loopback endpoints do not require a key. No local model has been installed or benchmarked on this laptop.
+
+Official provider references:
+- https://console.groq.com/docs/rate-limits
+- https://console.groq.com/docs/model/openai/gpt-oss-20b
+- https://console.groq.com/docs/openai
+
+## Methodology and implementation choices
+
+The pipeline maps dialogue to symptoms, retrieves clinical context, estimates disease weights, proposes follow-up questions, imagines answers, estimates per-disease response likelihoods, scores each question with the printed paper formula, and rewrites the selected question for the patient.
+
+**Question selection:** Equations 2-5 are retained. The printed formula takes entropy after marginalizing hypothetical answers. It is not standard expected posterior entropy. With a complete normalized response partition it returns the prior, even for a perfectly discriminating question. A regression test preserves this distinction. Standard expected information gain is a future experiment, not silently substituted here.
+
+**Observed-answer update:** `algo.belief_update: dialogue` estimates disease probabilities from the complete updated conversation and guidelines, consistent with the conditioning described in Section 2.3. `bayesian` retains the previous recursive likelihood multiplication as an explicitly labeled approximation, now with prior dialogue in the likelihood prompt. Neither mode establishes calibrated probabilities. Candidate diseases remain fixed at initialization; missing diseases cannot enter later.
+
+**Patient profiles:** the profile builder extracts symptoms, timing, triggers, negative findings and history with exact source quotes. Unknown age remains unknown. Quotes are checked against the source and literal diagnosis-label leakage is rejected. These checks do not prove semantic entailment; profiles still require review. The simulator receives the profile, not the original transcript. Profiles are cached by source case and model configuration under `data/processed/profiles` and reused across methods.
+
+**Opening:** all methods use the initial patient complaint; multi-turn methods prepend a neutral greeting. Original doctor utterances are never replayed as the opening question.
+
+**Patient answers:** the simulator selects numbered profile facts and code returns their exact statements, with unknown details acknowledged explicitly. This is a conservative departure from the paper's free-form patient persona. It prevents generated paraphrases from adding clinical findings; it does not validate the extracted profile or guarantee the relevance of selected facts.
+
+**Retrieval fallback:** when symptom extraction is empty, candidate retrieval uses the opening patient complaint instead of the first entries in the KB. BM25 ignores common English stopwords, and candidate retrieval excludes nonpositive matches. Missing relevant candidates now fail explicitly rather than using arbitrary diseases.
+
+**Model roles:** `llm` is the doctor. Optional `profile_llm`, `patient_llm`, and `judge_llm` blocks accept the same configuration; null inherits the doctor configuration. Sharing a model is convenient for a demo but creates evaluation bias. The old unused `patient` settings have been removed.
+
+**Validation:** likelihoods must be finite and in [0, 1]; all candidate diseases must be present. Initial weights must be nonnegative with positive mass. Hypothetical answers must be distinct and meet the configured count; invalid outputs trigger structured-output retries, never synthetic answer padding. The judge rubric excludes score 1.
+
+**Grounding:** the bundled KB is 11 original illustrative entries, not MSD content. Source title, URL and section fields are supported, but the bundled entries have no source citations. Disease-centric records approximate the paper's professional/consumer symptom-page representation. Retrieval index files are reused only when KB and retrieval configuration fingerprints match.
+
+## ReMeDi is publicly available
+
+The authors publish ReMeDi-base and state that all resources use the MIT license:
+- https://github.com/yanguojun123/Medical-Dialogue
+- https://github.com/yanguojun123/Medical-Dialogue/blob/main/data/ReMeDi-base.json
+- https://github.com/yanguojun123/Medical-Dialogue/blob/main/MIT-license.txt
+
+The downloaded original and license are in `data/remedi/raw` (gitignored). The release contains **1,557 Chinese conversations**. Its actual schema is `dialogue`, `information`, `sentence`, and per-turn `actions`; the adapter preserves all action labels.
+
+Inspection found:
+- 386 conversations containing a doctor Diagnosis action.
+- 0 conversations whose annotated doctor actions are exclusively Diagnosis.
+- 280 conversations with exactly one distinct nonempty Diagnosis/disease `value1` annotation.
+
+The paper reports 329 filtered cases. Its exact selection cannot be recovered from the stated rule alone. `single_diagnosis` is a documented provisional policy, not a reproduction claim:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/prepare_dataset.py --raw data/remedi/raw/ReMeDi-base.json --out data/processed/remedi_single_diagnosis.jsonl --eval-out data/processed/remedi_eval_100_provisional.jsonl --filter single_diagnosis --eval-n 100 --seed 42
 ```
 
-This reproduces §3.1's filtering exactly: keep only dialogues whose
-doctor turns are *exclusively* labeled `"Diagnosis"`, then randomly
-sample 100 (seeded).
+This writes a SHA-256 audit, policy, counts and selected IDs. Disease labels are provisional annotation-derived references. Multiple-diagnosis cases are excluded rather than arbitrarily choosing a label. No specialty or translation is invented. The Chinese labels need review and terminology alignment with a larger guideline KB before meaningful evaluation. The eight bundled English synthetic cases remain the immediate demo input.
 
-For offline experimentation without the real dataset, a small
-**synthetic, hand-written** sample in the correct schema is provided
-at `data/remedi/synthetic_sample.jsonl` (clearly not real ReMeDi data
-— see the file's header comment in the README).
+## Outputs and evaluation
 
-## Medical knowledge setup
+`run_app.py --out outputs/demo/result.json` saves configuration, patient profile and full dialogue trace. `chat.py --out outputs/chat/session.json` saves interactive sessions. Traces retain clinical and actual rewritten questions, imagined responses, per-disease likelihoods, question scores, grounding records and disease distributions.
 
-Also not bundled: the MSD Manual content itself is copyrighted. A
-small **original, hand-written** 11-disease sample knowledge base
-ships at `data/knowledge_base/sample_diseases.json` so the pipeline
-runs out of the box. To reproduce the paper's actual grounding source,
-supply your own legally-obtained MSD-Manual-derived (or other
-guideline) corpus in the same schema — see
-[`data/knowledge_base/README.md`](data/knowledge_base/README.md).
-
-```bash
-python scripts/build_index.py --mock            # sample KB, mock embeddings
-python scripts/build_index.py --kb data/knowledge_base/your_file.json  # real KB
+```powershell
+.\.venv\Scripts\python.exe scripts/evaluate.py --mock --cases data/remedi/synthetic_sample.jsonl --methods one_shot naive_multi_turn app --out-dir outputs/smoke_eval
 ```
 
-## API / provider configuration
+Evaluation produces CSV/JSON, summary and a manifest recording configuration, input hash, KB and selected cases. Failed runs are explicit rows excluded from score means, counted in the summary, and cause a nonzero command exit. Unavailable metrics are null rather than zero. Optional `matplotlib` generates APP's entropy plot; baseline entropy is not implemented. Accuracy is an LLM-judged 0/2/3/4/5 similarity score, not percent correct. Mock scores have no scientific meaning.
 
-Copy `.env.example` to `.env` and fill in whichever provider you use:
+## Remaining work before research claims
 
-```bash
-cp .env.example .env
-# then edit .env: OPENAI_API_KEY=... or ANTHROPIC_API_KEY=...
-```
+- Extend real-model conversation checks beyond the single synthetic demonstration.
+- Supply a sufficiently complete, source-linked guideline corpus and verify retrieval coverage.
+- Review the provisional ReMeDi labels, language handling and case selection.
+- Add independent/human evaluation and the missing paper experiment conditions.
+- Measure accuracy and calibration alongside entropy; low entropy can be confidently wrong.
+- Only then compare improvements such as expected information gain, candidate expansion and source-linked explanations.
 
-Then set `llm.provider` (and, for real retrieval quality,
-`rag.embedding_provider`) in `configs/default.yaml` or your own config
-file to `openai` or `anthropic` / `openai` / `sentence-transformers`.
-Every script also accepts `--mock` to force everything to run offline
-regardless of the config file.
-
-All hyperparameters from §3.3 are in `configs/default.yaml`:
-`K=5` candidate questions, `2<=L<=5` simulated responses per question,
-6 dialogue turns.
-
-## Running the system
-
-Run Dr.APP on a single case against the patient simulator:
-
-```bash
-# fully offline
-python scripts/run_app.py --mock \
-  --case data/remedi/synthetic_sample.jsonl --case-id SYN-001 --turns 3
-
-# with a real LLM (after configuring .env and configs/default.yaml)
-python scripts/run_app.py \
-  --case data/processed/remedi_eval_100.jsonl --case-id <some_id>
-```
-
-This prints, per turn: the clinically-selected question, its
-human-centric rewrite, the simulated patient's answer, and the entropy
-after the Bayesian update — plus the final diagnosis and full
-probability distribution.
-
-## Running baselines
-
-```bash
-python scripts/run_baseline.py --mock --method one_shot \
-  --case data/remedi/synthetic_sample.jsonl --case-id SYN-001
-
-python scripts/run_baseline.py --mock --method naive_multi_turn \
-  --case data/remedi/synthetic_sample.jsonl --case-id SYN-001
-```
-
-## Evaluation
-
-```bash
-python scripts/evaluate.py --mock \
-  --cases data/remedi/synthetic_sample.jsonl \
-  --methods one_shot naive_multi_turn app \
-  --out-dir outputs/smoke_eval
-
-# real run over the paper's 100-case subset
-python scripts/evaluate.py \
-  --cases data/processed/remedi_eval_100.jsonl \
-  --methods one_shot naive_multi_turn app \
-  --out-dir outputs/full_eval
-```
-
-Produces `results.csv`, `results.json`, `summary.json` (per-method
-means), and — for the `app` method — `entropy_across_iterations.png`,
-a Figure-4-style plot of average entropy per turn (only meaningful
-across multiple evaluated cases).
-
-## Expected outputs
-
-- `outputs/<run>/results.json` — one record per (case, method): predicted
-  diagnosis, accuracy score, entropy trajectory (APP only), human-centric
-  sub-scores.
-- `outputs/<run>/summary.json` — per-method means matching the shape of
-  the paper's Table 1 / Table 2 (not the same numbers — see deviations
-  below).
-- `outputs/<run>/entropy_across_iterations.png` — average entropy vs.
-  turn index for Dr.APP, analogous to Figure 4.
-
-## Testing
-
-```bash
-pytest tests/ -q
-```
-
-Includes:
-- `test_probability.py` — Eq. 1-3 (normalization, joint probability,
-  posterior marginalization, Bayesian update) with hand-computed
-  expected values.
-- `test_entropy.py` — Eq. 4-5 (Shannon entropy properties, expected
-  entropy, argmin selection, tie-breaking).
-- `test_question_selection.py` — end-to-end check that a more
-  informative candidate question is actually selected over a less
-  informative one (see the note in that file about how Eq. 3's
-  unweighted marginalization behaves on symmetric hypothetical
-  responses).
-- `test_retriever.py` — chunking, mock embeddings, FAISS/numpy
-  retrieval relevance and save/load round-trip.
-- `test_smoke_e2e.py` — full offline pipeline run (LLM → RAG →
-  Bayesian math → entropy selection → human-centric rewrite → patient
-  response → Bayesian update), plus both baselines and the dataset
-  preprocessing pipeline.
-
-All 33 tests pass with `--mock` (no network / API key required), and
-every command in this README's "Running the system" / "Running
-baselines" / "Evaluation" sections has been executed against
-`--mock` as part of preparing this repository.
-
-## Troubleshooting
-
-- **`ImportError: openai package required`** — install the optional
-  provider dependency (`pip install openai`) or use `--mock`.
-- **`OPENAI_API_KEY is not set`** — copy `.env.example` to `.env` and
-  fill it in, or pass `--mock`.
-- **`FileNotFoundError: ReMeDi raw data not found`** — you need to
-  supply your own ReMeDi export; see `data/remedi/README.md`. Use
-  `data/remedi/synthetic_sample.jsonl` for offline testing.
-- **`faiss` not installed** — the retriever automatically falls back
-  to a pure-numpy brute-force cosine search; correctness is
-  unaffected, only large-scale performance.
-- **Mock-mode output looks semantically odd** (e.g. a follow-up
-  question about the wrong symptom) — expected: `MockLLM` and
-  `MockEmbedder` are deterministic placeholders for *data shape*, not
-  a stand-in for real reasoning quality. Swap `llm.provider` /
-  `rag.embedding_provider` to a real backend for meaningful output.
-
-## Reproduction deviations / implementation decisions
-
-Read this section before citing any numbers produced by this codebase
-as a comparison to the paper's reported results.
-
-**1. Faithfully reproduced (the core claims of the paper):**
-- The Bayesian joint-probability, posterior-marginalization, and
-  Shannon-entropy computations (Eq. 1-5) are implemented exactly as
-  specified, in pure Python/numpy, independent of any LLM call, and
-  unit-tested against hand-computed values.
-- Minimum-expected-entropy question selection (Eq. 5) is a genuine
-  `argmin` over computed entropies — never an LLM ranking call.
-- The K=5 / 2≤L≤5 / 6-turn hyperparameters from §3.3.
-- The §3.1 dataset filtering/sampling logic (Diagnosis-only filter,
-  seeded 100-case sample).
-- The overall pipeline shape (symptom mapping → grounded diagnosis
-  distribution → grounded question generation → response simulation →
-  Bayesian update → entropy selection → human-centric rewrite).
-
-**2. Implementation choices / approximations (paper under-specifies
-these, or they require resources this repo cannot legally
-redistribute):**
-- **MSD Manual content**: not redistributed; a small original sample
-  knowledge base stands in for it. Grounding *quality* in a real run
-  depends entirely on the corpus you supply.
-- **ReMeDi's exact raw JSON schema**: not published in the paper; we
-  define an explicit, documented schema and a single adapter function
-  (`_coerce_case`) to convert from whatever the real export uses.
-- **Candidate disease set D**: fixed at dialogue initialization from
-  the opening symptoms (rather than recomputed from scratch each
-  turn), so the entropy trajectory is comparable across turns. The
-  paper does not specify whether D is static or dynamic.
-- **Entropy log base**: natural log; the paper doesn't specify a base.
-  This only rescales entropy values, never changes the Eq. 5 argmin.
-- **Numerical floor** (`1e-6` by default) applied when normalizing
-  distributions, to avoid `log(0)` / division-by-zero and to keep
-  every disease Bayesian-recoverable. Not specified in the paper.
-- **Diagnosis-accuracy and human-centric evaluation (§3.4.1, §3.4.3)**:
-  the paper used 3 human biomedical experts and 5 human non-medical
-  raters respectively. This repository substitutes an **LLM-as-judge**
-  using the same rubrics (Appendix A.1/A.2) as a scalable
-  approximation — this is explicitly *not* a reproduction of the
-  paper's human evaluation, and resulting scores should not be
-  directly compared to Table 1 / Table 2.
-- **Patient-profile construction model**: the paper uses DeepSeek-v3
-  specifically; this repo is provider-agnostic (whatever
-  `llm.provider` is configured).
-
-**3. Components requiring external data/API access to run for real**
-(all have documented, functioning offline substitutes for
-development/testing):
-- The real MSD Manual (or equivalent licensed clinical guideline
-  corpus) — offline substitute: `data/knowledge_base/sample_diseases.json`.
-- The real ReMeDi dataset — offline substitute:
-  `data/remedi/synthetic_sample.jsonl`.
-- A real LLM provider (OpenAI/Anthropic) for genuine reasoning quality
-  — offline substitute: `MockLLM`.
-- A real embedding provider for genuine semantic retrieval — offline
-  substitute: `MockEmbedder` (deterministic hashed bag-of-words).
-
-## Disclaimer
-
-This repository is provided for **research and educational purposes
-only**. It is not a certified medical device, has not been clinically
-validated, and must not be used to make real medical decisions for
-yourself or anyone else. If you have a medical concern, consult a
-qualified healthcare professional.
+This software is not clinically validated and must not be used to make real medical decisions.

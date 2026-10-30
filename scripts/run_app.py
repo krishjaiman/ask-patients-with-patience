@@ -16,6 +16,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import time
+from dataclasses import asdict
+from pathlib import Path
 
 from _common import (
     add_common_args, build_knowledge_base, build_llm_from_config, build_retriever, load_config,
@@ -23,7 +26,7 @@ from _common import (
 from askpatients.data.remedi_loader import ReMeDiCase, load_remedi_raw
 from askpatients.dialogue.app_agent import DrAPP
 from askpatients.dialogue.orchestrator import DialogueOrchestrator
-from askpatients.patient.profile import build_profile_from_case
+from askpatients.patient.store import get_profile
 from askpatients.patient.simulator import PatientSimulator
 
 logger = logging.getLogger(__name__)
@@ -35,10 +38,13 @@ def main() -> None:
     parser.add_argument("--case", required=True, help="Path to a ReMeDi-schema .jsonl file")
     parser.add_argument("--case-id", default=None, help="Which case_id to run (default: first case)")
     parser.add_argument("--turns", type=int, default=None, help="Override algo.max_dialogue_turns")
+    parser.add_argument('--out', default='outputs/demo/result.json', help='Full evidence trace JSON')
     args = parser.parse_args()
 
     cfg = load_config(args)
-    if args.turns:
+    if args.turns is not None:
+        if args.turns < 0:
+            parser.error('--turns must be nonnegative')
         cfg.algo.max_dialogue_turns = args.turns
 
     cases = load_remedi_raw(args.case)
@@ -46,22 +52,42 @@ def main() -> None:
         raise SystemExit(f"No cases found in {args.case}")
     case: ReMeDiCase = next((c for c in cases if c.case_id == args.case_id), cases[0]) \
         if args.case_id else cases[0]
+    if args.case_id and case.case_id != args.case_id:
+        parser.error(f'Unknown case ID: {args.case_id}')
     logger.info("Running case %s (ground truth: %s)", case.case_id, case.ground_truth_diagnosis)
 
     llm = build_llm_from_config(cfg)
     kb = build_knowledge_base(cfg, args.kb)
     retriever = build_retriever(cfg, kb)
 
-    profile = build_profile_from_case(
-        llm, case_id=case.case_id, transcript=case.full_transcript_text(),
-        presenting_complaint=case.opening_patient_turn(), symptoms=[],
-        ground_truth_diagnosis=case.ground_truth_diagnosis,
-    )
-    patient = PatientSimulator(llm, profile)
+    profile = get_profile(build_llm_from_config(cfg, 'profile_llm'), case)
+    patient = PatientSimulator(build_llm_from_config(cfg, 'patient_llm'), profile)
 
     app = DrAPP(llm, kb, retriever, cfg.algo)
-    orchestrator = DialogueOrchestrator(app, max_turns=cfg.algo.max_dialogue_turns)
-    result = orchestrator.run(case.case_id, case.opening_doctor_turn(), patient, case.ground_truth_diagnosis)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    saved_progress = False
+    def save_progress(result):
+        nonlocal saved_progress
+        record = {'config': asdict(cfg), 'profile': asdict(profile),
+                  'result': asdict(result), 'elapsed_seconds': time.monotonic() - started,
+                  'provider_usage': dict(getattr(llm, 'usage', {}))}
+        temporary = out.with_suffix(out.suffix + '.tmp')
+        temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
+        temporary.replace(out)
+        saved_progress = True
+    orchestrator = DialogueOrchestrator(app, max_turns=cfg.algo.max_dialogue_turns,
+                                       on_progress=save_progress)
+    try:
+        result = orchestrator.run(case.case_id, case.opening_doctor_turn(), patient, case.ground_truth_diagnosis)
+    except Exception:
+        if saved_progress:
+            partial = json.loads(out.read_text(encoding='utf-8'))
+            partial['result']['status'] = 'failed'
+            out.write_text(json.dumps(partial, ensure_ascii=False, indent=2), encoding='utf-8')
+        raise
+    print(f'Full evidence trace saved to {out}')
 
     print("=" * 70)
     print(f"Case: {case.case_id}   Ground truth: {case.ground_truth_diagnosis}")
@@ -69,7 +95,7 @@ def main() -> None:
     print(f"Doctor: {case.opening_doctor_turn()}")
     print(f"Patient: {patient.opening_statement()}")
     for t in result.turns:
-        print(f"\n--- Turn {t.turn} (H before ask: prior top={t.top_diagnosis_before!r} "
+        print(f"\n--- Turn {t.turn} (prior top={t.top_diagnosis_before!r} "
               f"p={t.top_diagnosis_prob_before:.3f}) ---")
         print(f"[clinical question selected by min-entropy]: {t.clinical_question}")
         print(f"Dr.APP: {t.human_question}")

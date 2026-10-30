@@ -46,11 +46,16 @@ class DiseaseEntry:
     what_a_doctor_does: str = ""                                # Upsilon(S_MSD) "What a doctor does"
     consumer_summary: str = ""                                  # simplified/consumer-facing text
 
+    source_url: str = ""
+    source_title: str = ""
+    source_section: str = ""
+
     def as_grounding_text(self) -> str:
         """Concatenated text used as retrieval-chunk content and as
         Gamma(d_i)/Upsilon(d_i) context passed into LLM prompts."""
         parts = [
             f"Disease: {self.disease}",
+            f"Source: {self.source_title} {self.source_url} ({self.source_section})" if self.source_url else "",
             f"Specialty: {self.specialty}" if self.specialty else "",
             f"Associated symptoms: {', '.join(self.symptoms)}" if self.symptoms else "",
             f"Causes: {self.causes}" if self.causes else "",

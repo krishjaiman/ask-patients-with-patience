@@ -14,9 +14,21 @@ Python, not an LLM call.
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
+
+
+class ProbabilityMap(BaseModel):
+    probabilities: Dict[str, Annotated[float, Field(ge=0, allow_inf_nan=False)]] = Field(min_length=1)
+
+    @field_validator('probabilities')
+    @classmethod
+    def check_coverage(cls, values, info: ValidationInfo):
+        expected = (info.context or {}).get('diseases')
+        if expected is not None and set(values) != set(expected):
+            raise ValueError('Return exactly one probability for every requested disease')
+        return values
 
 
 class SymptomMappingResult(BaseModel):
@@ -24,13 +36,18 @@ class SymptomMappingResult(BaseModel):
     symptoms: List[str] = Field(default_factory=list)
 
 
-class DiseaseProbabilityResult(BaseModel):
+class DiseaseProbabilityResult(ProbabilityMap):
     """
     Section 2.3 'Diagnosis Probability Prediction': the initial LLM-proposed
     disease probability distribution P_t(D) (Eq. 1), before it is
     renormalized by askpatients.bayesian.probability.normalize_distribution.
     """
-    probabilities: Dict[str, float] = Field(default_factory=dict)
+    @field_validator('probabilities')
+    @classmethod
+    def nonzero_mass(cls, values):
+        if sum(values.values()) <= 0:
+            raise ValueError('Disease weights must have positive total mass')
+        return values
 
 
 class CandidateQuestionsResult(BaseModel):
@@ -46,6 +63,8 @@ class CandidateQuestionsResult(BaseModel):
             if key and key not in seen:
                 seen.add(key)
                 out.append(q.strip())
+        if not out:
+            raise ValueError('At least one nonempty question is required')
         return out
 
 
@@ -54,7 +73,16 @@ class PossibleResponsesResult(BaseModel):
     Section 2.5 'One-more Step Thinking': plausible patient responses
     R_k = {r_k^1 .. r_k^L} for a single candidate question.
     """
-    responses: List[str] = Field(default_factory=list)
+    responses: List[str]
+
+    @field_validator('responses')
+    @classmethod
+    def distinct_answers(cls, values, info: ValidationInfo):
+        values = list({v.strip().casefold(): v.strip() for v in values if v.strip()}.values())
+        context = info.context or {}
+        if not context.get('min_responses', 2) <= len(values) <= context.get('max_responses', 5):
+            raise ValueError('Return the requested number of distinct nonempty answers')
+        return values
 
 
 class OneShotDiagnosisResult(BaseModel):
@@ -70,7 +98,7 @@ class NaiveFollowUpResult(BaseModel):
     question: str = ""
 
 
-class ConditionalProbabilityResult(BaseModel):
+class ConditionalProbabilityResult(ProbabilityMap):
     """
     Section 2.5: for ONE specific response r_k^l, the LLM-estimated
     likelihood P(r_k^l | Gamma(d_i)) for each disease d_i under
@@ -78,7 +106,7 @@ class ConditionalProbabilityResult(BaseModel):
     independent likelihoods, not a distribution) -- this mirrors Eq. 2,
     where P(r_k^l | Gamma(d_i)) is a per-disease conditional likelihood.
     """
-    probabilities: Dict[str, float] = Field(default_factory=dict)
+    probabilities: Dict[str, Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]] = Field(min_length=1)
 
 
 class DiagnosisJudgeResult(BaseModel):
@@ -90,7 +118,7 @@ class DiagnosisJudgeResult(BaseModel):
     This is an IMPLEMENTATION APPROXIMATION -- the paper used human
     biomedical experts, which this codebase cannot reproduce.
     """
-    score: int = Field(ge=0, le=5)
+    score: Literal[0, 2, 3, 4, 5]
     rationale: str = ""
 
 

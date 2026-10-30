@@ -1,33 +1,39 @@
-"""
-Section 3.2: the simulated patient agent. Answers doctor questions using
-ONLY the constructed persona (never the original transcript or the
-ground-truth diagnosis), and is instructed to "reasonably incorporate
-daily life details that align with the patient's personality and
-background," mirroring the paper's patient-simulation prompt.
+"""Extractive patient simulation: the LLM selects facts and code renders them.
+
+This restricts the paper's free-form role-play to avoid invented clinical
+findings. Profile extraction and fact relevance still require human review.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-
+import json
+from typing import Annotated
+from pydantic import BaseModel, Field, StrictInt, ValidationInfo, model_validator
 from askpatients.llm.base import BaseLLM, LLMMessage
 from askpatients.patient.profile import PatientProfile
 
 
 class PatientAnswerResult(BaseModel):
-    answer: str = ""
-    reveals_diagnosis: bool = False  # self-check flag; True triggers a scrub
+    fact_indices: list[Annotated[StrictInt, Field(ge=0)]]
+    unknown: bool
+
+    @model_validator(mode="after")
+    def valid_indices(self, info: ValidationInfo):
+        count = (info.context or {}).get('fact_count')
+        if count is not None and any(i >= count for i in self.fact_indices):
+            raise ValueError('Selected fact index is outside the supplied profile')
+        if len(set(self.fact_indices)) != len(self.fact_indices):
+            raise ValueError('Selected fact indices must be unique')
+        return self
 
 
-_PATIENT_SYSTEM_TEMPLATE = (
-    "{persona}\n\n"
-    "You are role-playing as this patient in a medical consultation. Answer the "
-    "doctor's question naturally and in character, using only what a real patient "
-    "in your situation would know or say. Reasonably incorporate daily life "
-    "details that align with your personality and background. Do NOT name or "
-    "hint at any medical diagnosis, disease name, or clinical term -- you do not "
-    "know what is wrong with you. Do NOT mention that you are an AI or a "
-    "simulation. Respond ONLY with JSON: "
-    '{{"answer": "...", "reveals_diagnosis": false}}.'
+_SYSTEM = (
+    "Select recorded patient facts relevant to the doctor's latest question. "
+    "Only the numbered facts are evidence; questions and hypothetical answers "
+    "are not facts. Set unknown=true when any requested detail is not recorded. "
+    "Absence of a symptom from the profile does NOT mean the patient denies it. "
+    "For example, bloating with no stool information means diarrhea is unknown. "
+    "Select no facts if none are relevant. Return ONLY JSON: "
+    '{"fact_indices": [0], "unknown": true}. Indices start at zero.'
 )
 
 
@@ -38,43 +44,28 @@ class PatientSimulator:
 
     def answer(self, doctor_question: str, dialogue_so_far: str,
                candidate_responses_hint: list[str] | None = None) -> str:
-        """
-        Answers `doctor_question`. If `candidate_responses_hint` is provided
-        (e.g. when reusing the plausible-response pool already generated for
-        Bayesian scoring), the simulator is nudged to pick/adapt one of those
-        for consistency with the active-learning step, but is not forced to
-        -- it can still answer freely in character.
-        """
-        hint = ""
-        if candidate_responses_hint:
-            hint = (
-                "\nFor reference, here are some example ways a patient might phrase "
-                f"an answer (you may use one as inspiration, or answer differently "
-                f"if it fits your persona better): {candidate_responses_hint}"
-            )
-        system = _PATIENT_SYSTEM_TEMPLATE.format(persona=self.profile.as_persona_text())
+        # Hypothetical response hints are intentionally not patient evidence.
+        facts = self.profile.clinical_facts
         messages = [
-            LLMMessage(role="system", content=system),
-            LLMMessage(
-                role="user",
-                content=f"Conversation so far:\n{dialogue_so_far}\n\nDoctor asks: {doctor_question}{hint}",
-            ),
+            LLMMessage(role="system", content=_SYSTEM),
+            LLMMessage(role="user", content=(
+                f"Numbered recorded facts:\n{json.dumps(dict(enumerate(facts)), ensure_ascii=False)}"
+                f"\nConversation (context only):\n{dialogue_so_far}"
+                f"\nDoctor asks: {doctor_question}")),
         ]
-        result: PatientAnswerResult = self.llm.complete_structured(
+        result = self.llm.complete_structured(
             messages, PatientAnswerResult,
-            mock_context={"candidate_responses": candidate_responses_hint},
+            mock_context={"fact_count": len(facts)},
+            validation_context={"fact_count": len(facts)},
         )
-        answer = result.answer.strip()
-        if not answer:
-            answer = "I'm not sure how to describe it, but it's been bothering me."
-        return self._scrub_diagnosis_leak(answer)
+        statements = [facts[i]['statement'].strip().rstrip('.') for i in result.fact_indices]
+        answer = "What I can tell you is: " + "; ".join(statements) + "." if statements else ""
+        if result.unknown or not statements:
+            answer += " I don't know about the other details you asked." if statements else "I don't know."
+        gt = self.profile.ground_truth_diagnosis.strip().casefold()
+        if gt and gt in answer.casefold():
+            return "I don't know."
+        return answer
 
     def opening_statement(self) -> str:
         return self.profile.presenting_complaint
-
-    def _scrub_diagnosis_leak(self, answer: str) -> str:
-        gt = self.profile.ground_truth_diagnosis.lower()
-        if gt and gt in answer.lower():
-            return "I'm not sure exactly what it is, but here's what I've noticed: " + \
-                answer.lower().replace(gt, "this")
-        return answer
